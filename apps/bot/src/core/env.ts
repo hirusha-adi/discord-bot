@@ -1,4 +1,6 @@
-import "dotenv/config";
+import { loadBotEnvironment } from "./load-env.js";
+
+loadBotEnvironment();
 
 function requireEnv(name: string): string {
     const value = process.env[name];

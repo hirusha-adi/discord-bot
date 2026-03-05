@@ -12,6 +12,12 @@
         "db:generate": "pnpm --filter @platform/db prisma generate",
         "db:migrate": "pnpm --filter @platform/db prisma migrate dev",
         "db:deploy": "pnpm --filter @platform/db prisma migrate deploy",
-        "db:studio": "pnpm --filter @platform/db prisma studio"
+        "db:studio": "pnpm --filter @platform/db prisma studio",
+        "dev:api": "pnpm --filter @platform/api dev",
+        "dev:bot": "pnpm --filter @platform/bot dev",
+        "dev:web": "pnpm --filter @platform/web dev",
+        "dev:worker": "pnpm --filter @platform/api worker",
+        "compose:up": "docker compose up --build",
+        "compose:down": "docker compose down"
     }
 }

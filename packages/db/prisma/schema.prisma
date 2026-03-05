@@ -7,37 +7,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-enum ModerationActionType {
-  BAN
-  KICK
-  MUTE
-  TIMEOUT
-  WARN
-  SOFTBAN
-  UNBAN
-  NOTE
-}
-
-enum ScheduledTaskStatus {
-  PENDING
-  RUNNING
-  COMPLETED
-  FAILED
-  CANCELED
-}
-
-enum TicketStatus {
-  OPEN
-  CLOSED
-  REOPENED
-}
-
-enum AuditActorType {
-  DASHBOARD_ADMIN
-  DISCORD_USER
-  SYSTEM
-}
-
 model Guild {
   id               String            @id
   name             String
@@ -199,7 +168,8 @@ model ModerationLog {
   caseNumber       Int
   targetUserId     String
   moderatorUserId  String
-  actionType       ModerationActionType
+  // Allowed values: BAN, KICK, MUTE, TIMEOUT, WARN, SOFTBAN, UNBAN, NOTE
+  actionType       String
   reason           String?
   durationSeconds  Int?
   active           Boolean              @default(true)
@@ -279,7 +249,8 @@ model ScheduledTask {
   taskType      String
   payloadJson   String
   executeAt     DateTime
-  status        ScheduledTaskStatus @default(PENDING)
+  // Allowed values: PENDING, RUNNING, COMPLETED, FAILED, CANCELED
+  status        String              @default("PENDING")
   attempts      Int                 @default(0)
   maxAttempts   Int                 @default(5)
   lastError     String?
@@ -358,7 +329,8 @@ model Ticket {
   assignedToUserId  String?
   channelId         String
   categoryId        String?
-  status            TicketStatus @default(OPEN)
+  // Allowed values: OPEN, CLOSED, REOPENED
+  status            String       @default("OPEN")
   subject           String?
   transcriptUrl     String?
   closedAt          DateTime?
@@ -409,7 +381,8 @@ model EconomyTransaction {
 model AuditLog {
   id             String         @id @default(cuid())
   guildId        String?
-  actorType      AuditActorType
+  // Allowed values: DASHBOARD_ADMIN, DISCORD_USER, SYSTEM
+  actorType      String
   actorId        String
   action         String
   targetType     String?
