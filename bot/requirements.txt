@@ -1,1 +1,2 @@
 discord.py==2.6.3
+SQLAlchemy==2.0.41

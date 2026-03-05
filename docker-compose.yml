@@ -8,6 +8,8 @@ services:
       - .env.example
     ports:
       - "8000:8000"
+    volumes:
+      - sqlite_data:/data
     restart: unless-stopped
 
   web:
@@ -28,4 +30,9 @@ services:
       - .env.example
     depends_on:
       - api
+    volumes:
+      - sqlite_data:/data
     restart: unless-stopped
+
+volumes:
+  sqlite_data:
