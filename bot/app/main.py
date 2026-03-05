@@ -1,9 +1,9 @@
 import asyncio
+import json
 import os
 from datetime import UTC, datetime
 
 import discord
-from discord import app_commands
 from discord.ext import commands
 from sqlalchemy import create_engine, text
 from sqlalchemy.exc import SQLAlchemyError
@@ -74,11 +74,82 @@ def get_module_settings_for_guild(discord_guild_id: str) -> dict[str, bool]:
     }
 
 
-class Stage5Bot(commands.Bot):
+def _parse_image_urls(raw_value) -> list[str]:
+    if raw_value is None:
+        return []
+    if isinstance(raw_value, list):
+        return [str(url).strip() for url in raw_value if str(url).strip()]
+    if isinstance(raw_value, str):
+        try:
+            parsed = json.loads(raw_value)
+            if isinstance(parsed, list):
+                return [str(url).strip() for url in parsed if str(url).strip()]
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
+def get_dm_config_for_guild(discord_guild_id: str, event_type: str) -> dict:
+    if event_type not in {"welcome", "leave"}:
+        raise ValueError("event_type must be 'welcome' or 'leave'")
+
+    table_name = "welcome_configs" if event_type == "welcome" else "leave_configs"
+    query = text(
+        f"""
+        SELECT
+            COALESCE(cfg.enabled, 0) AS enabled,
+            cfg.markdown_text AS markdown_text,
+            cfg.image_urls AS image_urls
+        FROM guilds g
+        LEFT JOIN {table_name} cfg ON cfg.guild_id = g.id
+        WHERE g.discord_guild_id = :discord_guild_id
+        """
+    )
+
+    with engine.connect() as connection:
+        row = connection.execute(query, {"discord_guild_id": discord_guild_id}).mappings().first()
+
+    if not row:
+        return {"enabled": False, "markdown_text": None, "image_urls": []}
+
+    return {
+        "enabled": bool(row["enabled"]),
+        "markdown_text": row["markdown_text"],
+        "image_urls": _parse_image_urls(row["image_urls"]),
+    }
+
+
+async def send_configured_dm(member: discord.Member, event_type: str) -> None:
+    config = get_dm_config_for_guild(str(member.guild.id), event_type)
+    if not config["enabled"]:
+        return
+
+    content = config.get("markdown_text") or None
+
+    # Stage 6 image method: image URL list from config sent as embeds.
+    embeds = []
+    for image_url in (config.get("image_urls") or [])[:10]:
+        embed = discord.Embed()
+        embed.set_image(url=image_url)
+        embeds.append(embed)
+
+    if content is None and not embeds:
+        print(f"[bot] {event_type} DM enabled but no content/images configured for guild {member.guild.id}")
+        return
+
+    try:
+        await member.send(content=content, embeds=embeds)
+        print(f"[bot] Sent {event_type} DM to user {member.id} in guild {member.guild.id}")
+    except discord.Forbidden:
+        print(f"[bot] Could not send {event_type} DM to user {member.id}: DMs closed or blocked")
+    except discord.HTTPException as exc:
+        print(f"[bot] Failed to send {event_type} DM to user {member.id}: {exc}")
+
+
+class Stage6Bot(commands.Bot):
     def __init__(self) -> None:
         intents = discord.Intents.all()
         super().__init__(command_prefix="!", intents=intents)
-        self.synced = False
 
     async def setup_hook(self) -> None:
         if DISCORD_TEST_GUILD_ID:
@@ -93,8 +164,20 @@ class Stage5Bot(commands.Bot):
     async def on_ready(self) -> None:
         print(f"[bot] Logged in as {self.user} (id={self.user.id if self.user else 'n/a'})")
 
+    async def on_member_join(self, member: discord.Member) -> None:
+        try:
+            await send_configured_dm(member, "welcome")
+        except SQLAlchemyError as exc:
+            print(f"[bot] Welcome config DB read failed for guild {member.guild.id}: {exc}")
 
-bot = Stage5Bot()
+    async def on_member_remove(self, member: discord.Member) -> None:
+        try:
+            await send_configured_dm(member, "leave")
+        except SQLAlchemyError as exc:
+            print(f"[bot] Leave config DB read failed for guild {member.guild.id}: {exc}")
+
+
+bot = Stage6Bot()
 
 
 @bot.tree.command(name="ping", description="Check bot latency")
@@ -130,9 +213,7 @@ async def uptime(interaction: discord.Interaction) -> None:
     total_seconds = int(elapsed.total_seconds())
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
-    await interaction.response.send_message(
-        f"Uptime: {hours}h {minutes}m {seconds}s"
-    )
+    await interaction.response.send_message(f"Uptime: {hours}h {minutes}m {seconds}s")
 
 
 async def main() -> None:
