@@ -11,6 +11,7 @@ Production-oriented, multi-tenant Discord bot platform (MEE6-style) with:
 ## Architecture
 - Full system design: `docs/architecture/system-design.md`
 - Repository layout: `docs/architecture/folder-structure.md`
+- Phase 1 setup and validation: `docs/runbooks/phase1-setup.md`
 
 ## Workspace Structure
 - `apps/bot`: Discord gateway service and module runtime.
@@ -23,4 +24,6 @@ Production-oriented, multi-tenant Discord bot platform (MEE6-style) with:
 - `tests/*`: Integration, E2E, and load testing.
 
 ## Current Status
-Architecture and folder scaffold are generated. Next step is implementing phase 1 (database schema, auth primitives, and bot admin provisioning flow).
+Phase 1 is implemented:
+- Prisma schema and initial migration are added.
+- Bot command `/create-dashboard-admin` is implemented with secure DM credential flow.

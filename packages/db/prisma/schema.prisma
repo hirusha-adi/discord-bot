@@ -1,0 +1,443 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum ModerationActionType {
+  BAN
+  KICK
+  MUTE
+  TIMEOUT
+  WARN
+  SOFTBAN
+  UNBAN
+  NOTE
+}
+
+enum ScheduledTaskStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  CANCELED
+}
+
+enum TicketStatus {
+  OPEN
+  CLOSED
+  REOPENED
+}
+
+enum AuditActorType {
+  DASHBOARD_ADMIN
+  DISCORD_USER
+  SYSTEM
+}
+
+model Guild {
+  id               String            @id
+  name             String
+  ownerDiscordId   String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  settings         GuildSettings?
+  modules          GuildModule[]
+  roles            Role[]
+  permissions      Permission[]
+  levelingData     LevelingData[]
+  moderationLogs   ModerationLog[]
+  automations      Automation[]
+  customCommands   CustomCommand[]
+  reactionRoles    ReactionRole[]
+  scheduledTasks   ScheduledTask[]
+  welcomeMessages  WelcomeMessage[]
+  tempBans         TempBan[]
+  giveaways        Giveaway[]
+  tickets          Ticket[]
+  economyBalances  EconomyBalance[]
+  economyTxns      EconomyTransaction[]
+  dashboardAdmins  DashboardAdmin[]
+  auditLogs        AuditLog[]
+
+  @@map("Guilds")
+}
+
+model GuildSettings {
+  id                  String   @id @default(cuid())
+  guildId             String   @unique
+  prefix              String   @default("!")
+  locale              String   @default("en-US")
+  timezone            String   @default("UTC")
+  logChannelId        String?
+  modLogChannelId     String?
+  welcomeChannelId    String?
+  goodbyeChannelId    String?
+  dashboardTheme      String?
+  antiSpamEnabled     Boolean  @default(false)
+  antiInviteEnabled   Boolean  @default(false)
+  antiCapsEnabled     Boolean  @default(false)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  guild               Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@index([guildId])
+  @@map("GuildSettings")
+}
+
+model GuildModule {
+  id            String   @id @default(cuid())
+  guildId       String
+  moduleKey     String
+  enabled       Boolean  @default(true)
+  configJson    String?
+  configVersion Int      @default(1)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  guild         Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, moduleKey])
+  @@index([guildId])
+  @@map("GuildModules")
+}
+
+model User {
+  id              String    @id
+  username        String?
+  discriminator   String?
+  avatarUrl       String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  lastSeenAt      DateTime?
+  adminLinks      DashboardAdmin[]
+  levelingData    LevelingData[]
+  moderationCasesAsModerator ModerationLog[] @relation("ModerationModerator")
+  moderationCasesAsTarget    ModerationLog[] @relation("ModerationTarget")
+  tickets                    Ticket[]        @relation("TicketCreator")
+  balances        EconomyBalance[]
+  transactions    EconomyTransaction[]
+
+  @@map("Users")
+}
+
+model DashboardAdmin {
+  id            String         @id @default(cuid())
+  discordUserId String
+  guildId       String
+  username      String
+  passwordHash  String
+  createdAt     DateTime       @default(now())
+  lastLogin     DateTime?
+  isActive      Boolean        @default(true)
+  user          User           @relation(fields: [discordUserId], references: [id], onDelete: Cascade)
+  guild         Guild          @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  sessions      AdminSession[]
+
+  @@unique([discordUserId, guildId])
+  @@index([guildId, username])
+  @@index([discordUserId])
+  @@map("DashboardAdmins")
+}
+
+model Role {
+  id          String   @id @default(cuid())
+  guildId     String
+  discordRoleId String?
+  name        String
+  description String?
+  isSystem    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  guild       Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@index([guildId])
+  @@map("Roles")
+}
+
+model Permission {
+  id          String   @id @default(cuid())
+  guildId     String
+  subjectType String
+  subjectId   String
+  moduleKey   String
+  commandKey  String?
+  action      String
+  effect      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  guild       Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, moduleKey])
+  @@index([guildId, subjectType, subjectId])
+  @@map("Permissions")
+}
+
+model LevelingData {
+  id             String   @id @default(cuid())
+  guildId        String
+  userId         String
+  xp             Int      @default(0)
+  level          Int      @default(0)
+  messageCount   Int      @default(0)
+  lastMessageAt  DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  guild          Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, userId])
+  @@index([guildId, xp])
+  @@map("LevelingData")
+}
+
+model ModerationLog {
+  id               String               @id @default(cuid())
+  guildId          String
+  caseNumber       Int
+  targetUserId     String
+  moderatorUserId  String
+  actionType       ModerationActionType
+  reason           String?
+  durationSeconds  Int?
+  active           Boolean              @default(true)
+  appealNotes      String?
+  modNotes         String?
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+  expiresAt        DateTime?
+  guild            Guild                @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  moderator        User                 @relation("ModerationModerator", fields: [moderatorUserId], references: [id], onDelete: Restrict)
+  target           User                 @relation("ModerationTarget", fields: [targetUserId], references: [id], onDelete: Restrict)
+
+  @@unique([guildId, caseNumber])
+  @@index([guildId, targetUserId])
+  @@index([guildId, moderatorUserId])
+  @@map("ModerationLogs")
+}
+
+model Automation {
+  id            String   @id @default(cuid())
+  guildId       String
+  name          String
+  enabled       Boolean  @default(true)
+  triggerType   String
+  conditionJson String
+  actionJson    String
+  createdBy     String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  guild         Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, enabled])
+  @@map("Automations")
+}
+
+model CustomCommand {
+  id                   String   @id @default(cuid())
+  guildId              String
+  name                 String
+  responseType         String
+  responseText         String?
+  responseEmbedJson    String?
+  conditionsJson       String?
+  cooldownSeconds      Int      @default(0)
+  requiredPermission   String?
+  enabled              Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  guild                Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, name])
+  @@index([guildId, enabled])
+  @@map("CustomCommands")
+}
+
+model ReactionRole {
+  id                 String   @id @default(cuid())
+  guildId            String
+  channelId          String
+  messageId          String
+  emoji              String
+  roleId             String
+  removeOnUnreact    Boolean  @default(true)
+  maxRolesPerUser    Int?
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+  guild              Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, messageId])
+  @@unique([guildId, messageId, emoji])
+  @@map("ReactionRoles")
+}
+
+model ScheduledTask {
+  id            String              @id @default(cuid())
+  guildId       String
+  taskType      String
+  payloadJson   String
+  executeAt     DateTime
+  status        ScheduledTaskStatus @default(PENDING)
+  attempts      Int                 @default(0)
+  maxAttempts   Int                 @default(5)
+  lastError     String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  guild         Guild               @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, status, executeAt])
+  @@map("ScheduledTasks")
+}
+
+model WelcomeMessage {
+  id                String   @id @default(cuid())
+  guildId           String
+  channelId         String?
+  dmEnabled         Boolean  @default(false)
+  enabled           Boolean  @default(true)
+  messageTemplate   String
+  goodbyeTemplate   String?
+  embedJson         String?
+  imageEnabled      Boolean  @default(false)
+  imageBackground   String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  guild             Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, enabled])
+  @@map("WelcomeMessages")
+}
+
+model TempBan {
+  id              String   @id @default(cuid())
+  guildId         String
+  userId          String
+  moderatorUserId String
+  reason          String?
+  startsAt        DateTime @default(now())
+  endsAt          DateTime
+  unbannedAt      DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  guild           Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, userId, endsAt])
+  @@map("TempBans")
+}
+
+model Giveaway {
+  id                    String   @id @default(cuid())
+  guildId               String
+  channelId             String
+  messageId             String?
+  title                 String
+  description           String?
+  winnerCount           Int      @default(1)
+  requiredRoleId        String?
+  requiredLevel         Int?
+  startsAt              DateTime @default(now())
+  endsAt                DateTime
+  endedAt               DateTime?
+  createdBy             String
+  entryCount            Int      @default(0)
+  status                String   @default("ACTIVE")
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  guild                 Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+
+  @@index([guildId, status, endsAt])
+  @@map("Giveaways")
+}
+
+model Ticket {
+  id                String       @id @default(cuid())
+  guildId           String
+  createdByUserId   String
+  assignedToUserId  String?
+  channelId         String
+  categoryId        String?
+  status            TicketStatus @default(OPEN)
+  subject           String?
+  transcriptUrl     String?
+  closedAt          DateTime?
+  reopenedAt        DateTime?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  guild             Guild        @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  creator           User         @relation("TicketCreator", fields: [createdByUserId], references: [id], onDelete: Restrict)
+
+  @@index([guildId, status])
+  @@index([guildId, createdByUserId])
+  @@map("Tickets")
+}
+
+model EconomyBalance {
+  id             String   @id @default(cuid())
+  guildId        String
+  userId         String
+  balance        BigInt   @default(0)
+  bankBalance    BigInt   @default(0)
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
+  guild          Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([guildId, userId])
+  @@index([guildId, balance])
+  @@map("EconomyBalances")
+}
+
+model EconomyTransaction {
+  id             String   @id @default(cuid())
+  guildId        String
+  actorUserId    String
+  targetUserId   String?
+  txType         String
+  amount         BigInt
+  balanceAfter   BigInt
+  metadataJson   String?
+  createdAt      DateTime @default(now())
+  guild          Guild    @relation(fields: [guildId], references: [id], onDelete: Cascade)
+  actor          User     @relation(fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([guildId, actorUserId, createdAt])
+  @@map("EconomyTransactions")
+}
+
+model AuditLog {
+  id             String         @id @default(cuid())
+  guildId        String?
+  actorType      AuditActorType
+  actorId        String
+  action         String
+  targetType     String?
+  targetId       String?
+  metadataJson   String?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime       @default(now())
+  guild          Guild?         @relation(fields: [guildId], references: [id], onDelete: SetNull)
+
+  @@index([guildId, action, createdAt])
+  @@index([actorId, createdAt])
+  @@map("AuditLogs")
+}
+
+model AdminSession {
+  id                String   @id @default(cuid())
+  dashboardAdminId  String
+  tokenHash         String
+  ipAddress         String?
+  userAgent         String?
+  expiresAt         DateTime
+  revokedAt         DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  admin             DashboardAdmin @relation(fields: [dashboardAdminId], references: [id], onDelete: Cascade)
+
+  @@index([dashboardAdminId, expiresAt])
+  @@index([tokenHash])
+  @@map("AdminSessions")
+}

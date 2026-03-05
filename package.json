@@ -1,0 +1,17 @@
+{
+    "name": "discord-bot-saas",
+    "private": true,
+    "version": "0.1.0",
+    "description": "Multi-tenant Discord bot SaaS platform monorepo",
+    "packageManager": "pnpm@9.12.3",
+    "workspaces": [
+        "apps/*",
+        "packages/*"
+    ],
+    "scripts": {
+        "db:generate": "pnpm --filter @platform/db prisma generate",
+        "db:migrate": "pnpm --filter @platform/db prisma migrate dev",
+        "db:deploy": "pnpm --filter @platform/db prisma migrate deploy",
+        "db:studio": "pnpm --filter @platform/db prisma studio"
+    }
+}
