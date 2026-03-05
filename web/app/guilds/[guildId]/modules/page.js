@@ -329,6 +329,7 @@ export default function GuildModulesPage({ params }) {
       </section>
 
       <div className="flex gap-4 text-sm">
+        <Link href={`/guilds/${guildId}/audit-logs`} className="text-sky-300 hover:text-sky-200">View Audit Logs</Link>
         <Link href={`/guilds/${guildId}`} className="text-sky-300 hover:text-sky-200">Back to Overview</Link>
         <Link href="/guilds" className="text-sky-300 hover:text-sky-200">Back to Guilds</Link>
       </div>

@@ -72,6 +72,14 @@ def _parse_emails_from_text(text_data: str) -> list[str]:
     return sorted(emails)
 
 
+def _truncate_text(value: str | None, max_len: int = 1500) -> str | None:
+    if value is None:
+        return None
+    if len(value) <= max_len:
+        return value
+    return value[: max_len - 3] + "..."
+
+
 def _ensure_guild_row(discord_guild_id: str, guild_name: str) -> int:
     with engine.begin() as connection:
         guild_row = connection.execute(
@@ -102,6 +110,180 @@ def _ensure_guild_row(discord_guild_id: str, guild_name: str) -> int:
             {"discord_guild_id": discord_guild_id, "name": guild_name, "now": datetime.now(UTC)},
         )
         return int(inserted.lastrowid)
+
+
+def _get_audit_log_config(discord_guild_id: str) -> dict:
+    query = text(
+        """
+        SELECT
+            COALESCE(a.enabled, 0) AS enabled,
+            a.destination_type AS destination_type,
+            a.log_channel_id AS log_channel_id
+        FROM guilds g
+        LEFT JOIN audit_log_configs a ON a.guild_id = g.id
+        WHERE g.discord_guild_id = :discord_guild_id
+        """
+    )
+
+    with engine.connect() as connection:
+        row = connection.execute(query, {"discord_guild_id": discord_guild_id}).mappings().first()
+
+    if not row:
+        return {"enabled": False, "destination_type": "dashboard", "log_channel_id": None}
+
+    return {
+        "enabled": bool(row["enabled"]),
+        "destination_type": row["destination_type"] or "dashboard",
+        "log_channel_id": row["log_channel_id"],
+    }
+
+
+def _store_message_audit_event(
+    guild_row_id: int,
+    event_type: str,
+    channel_discord_id: str | None,
+    message_id: str,
+    author_discord_id: str | None,
+    old_content: str | None,
+    new_content: str | None,
+) -> None:
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                INSERT INTO message_audit_events (
+                    guild_id,
+                    event_type,
+                    author_discord_id,
+                    channel_discord_id,
+                    message_id,
+                    old_content,
+                    new_content,
+                    occurred_at
+                )
+                VALUES (
+                    :guild_id,
+                    :event_type,
+                    :author_discord_id,
+                    :channel_discord_id,
+                    :message_id,
+                    :old_content,
+                    :new_content,
+                    :occurred_at
+                )
+                """
+            ),
+            {
+                "guild_id": guild_row_id,
+                "event_type": event_type,
+                "author_discord_id": author_discord_id,
+                "channel_discord_id": channel_discord_id,
+                "message_id": message_id,
+                "old_content": _truncate_text(old_content),
+                "new_content": _truncate_text(new_content),
+                "occurred_at": datetime.now(UTC),
+            },
+        )
+
+
+async def _send_audit_log_message(
+    guild: discord.Guild,
+    config: dict,
+    event_type: str,
+    channel_discord_id: str | None,
+    message_id: str,
+    author_discord_id: str | None,
+    old_content: str | None,
+    new_content: str | None,
+) -> None:
+    log_channel_id = config.get("log_channel_id")
+    if not log_channel_id:
+        return
+
+    if not str(log_channel_id).isdigit():
+        print(f"[bot] Invalid audit log channel id for guild {guild.id}: {log_channel_id}")
+        return
+
+    channel = guild.get_channel(int(log_channel_id))
+    if channel is None:
+        try:
+            fetched = await guild.fetch_channel(int(log_channel_id))
+        except discord.HTTPException as exc:
+            print(f"[bot] Failed to fetch audit log channel {log_channel_id} in guild {guild.id}: {exc}")
+            return
+        channel = fetched
+
+    if not isinstance(channel, discord.TextChannel):
+        print(f"[bot] Audit log channel {log_channel_id} is not a text channel in guild {guild.id}")
+        return
+
+    embed = discord.Embed(
+        title="Message Edited" if event_type == "edit" else "Message Deleted",
+        color=discord.Color.orange() if event_type == "edit" else discord.Color.red(),
+        timestamp=datetime.now(UTC),
+    )
+    embed.add_field(name="Message ID", value=message_id, inline=False)
+    embed.add_field(name="Channel ID", value=channel_discord_id or "unknown", inline=False)
+    embed.add_field(name="Author ID", value=author_discord_id or "unknown", inline=False)
+    embed.add_field(name="Old Content", value=_truncate_text(old_content, 900) or "(none)", inline=False)
+    if event_type == "edit":
+        embed.add_field(name="New Content", value=_truncate_text(new_content, 900) or "(none)", inline=False)
+
+    try:
+        await channel.send(embed=embed)
+    except discord.Forbidden:
+        print(f"[bot] Missing permission to send audit logs in channel {log_channel_id} (guild {guild.id})")
+    except discord.HTTPException as exc:
+        print(f"[bot] Failed to send audit log message in guild {guild.id}: {exc}")
+
+
+async def _handle_message_audit_event(
+    guild: discord.Guild | None,
+    guild_id: int | None,
+    guild_name: str | None,
+    event_type: str,
+    channel_discord_id: str | None,
+    message_id: str,
+    author_discord_id: str | None,
+    old_content: str | None,
+    new_content: str | None,
+    is_author_bot: bool,
+) -> None:
+    if guild is None and guild_id is None:
+        return
+
+    if is_author_bot:
+        return
+
+    effective_guild_id = str(guild.id if guild is not None else guild_id)
+    effective_guild_name = guild.name if guild is not None else (guild_name or f"Guild {effective_guild_id}")
+
+    config = _get_audit_log_config(effective_guild_id)
+    if not config["enabled"]:
+        return
+
+    guild_row_id = _ensure_guild_row(effective_guild_id, effective_guild_name)
+    _store_message_audit_event(
+        guild_row_id=guild_row_id,
+        event_type=event_type,
+        channel_discord_id=channel_discord_id,
+        message_id=message_id,
+        author_discord_id=author_discord_id,
+        old_content=old_content,
+        new_content=new_content,
+    )
+
+    if guild is not None and config.get("log_channel_id"):
+        await _send_audit_log_message(
+            guild=guild,
+            config=config,
+            event_type=event_type,
+            channel_discord_id=channel_discord_id,
+            message_id=message_id,
+            author_discord_id=author_discord_id,
+            old_content=old_content,
+            new_content=new_content,
+        )
 
 
 def _get_verification_config(discord_guild_id: str) -> dict:
@@ -483,6 +665,62 @@ class Stage7Bot(commands.Bot):
             _remove_verification_link(str(guild.id), str(user.id))
         except SQLAlchemyError as exc:
             print(f"[bot] Verification cleanup on ban failed for guild {guild.id}: {exc}")
+
+    async def on_raw_message_edit(self, payload: discord.RawMessageUpdateEvent) -> None:
+        if payload.guild_id is None:
+            return
+
+        guild = self.get_guild(payload.guild_id)
+        guild_name = guild.name if guild is not None else None
+
+        cached_message = payload.cached_message
+        old_content = cached_message.content if cached_message is not None else None
+        is_author_bot = bool(cached_message.author.bot) if cached_message is not None else False
+        author_discord_id = str(cached_message.author.id) if cached_message is not None else None
+
+        new_content = payload.data.get("content")
+        if cached_message is not None and new_content == old_content:
+            return
+
+        try:
+            await _handle_message_audit_event(
+                guild=guild,
+                guild_id=payload.guild_id,
+                guild_name=guild_name,
+                event_type="edit",
+                channel_discord_id=str(payload.channel_id) if payload.channel_id else None,
+                message_id=str(payload.message_id),
+                author_discord_id=author_discord_id,
+                old_content=old_content,
+                new_content=new_content,
+                is_author_bot=is_author_bot,
+            )
+        except SQLAlchemyError as exc:
+            print(f"[bot] Audit logging failed on message edit in guild {payload.guild_id}: {exc}")
+
+    async def on_raw_message_delete(self, payload: discord.RawMessageDeleteEvent) -> None:
+        if payload.guild_id is None:
+            return
+
+        guild = self.get_guild(payload.guild_id)
+        guild_name = guild.name if guild is not None else None
+        cached_message = payload.cached_message
+
+        try:
+            await _handle_message_audit_event(
+                guild=guild,
+                guild_id=payload.guild_id,
+                guild_name=guild_name,
+                event_type="delete",
+                channel_discord_id=str(payload.channel_id) if payload.channel_id else None,
+                message_id=str(payload.message_id),
+                author_discord_id=str(cached_message.author.id) if cached_message is not None else None,
+                old_content=cached_message.content if cached_message is not None else None,
+                new_content=None,
+                is_author_bot=bool(cached_message.author.bot) if cached_message is not None else False,
+            )
+        except SQLAlchemyError as exc:
+            print(f"[bot] Audit logging failed on message delete in guild {payload.guild_id}: {exc}")
 
     async def verification_sync_worker(self) -> None:
         while not self.is_closed():

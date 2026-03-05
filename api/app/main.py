@@ -3,6 +3,7 @@ import os
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.audit_logs import router as audit_logs_router
 from app.auth import router as auth_router
 from app.db import db_ping
 from app.deps import get_current_user
@@ -26,6 +27,7 @@ app.include_router(auth_router)
 app.include_router(guilds_router)
 app.include_router(modules_router)
 app.include_router(verification_router)
+app.include_router(audit_logs_router)
 
 
 @app.get("/health")

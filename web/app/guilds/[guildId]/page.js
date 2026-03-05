@@ -44,7 +44,10 @@ export default function GuildOverviewPage({ params }) {
               <h2 className="text-xl font-semibold">{overview.guild.name}</h2>
               <p className="text-sm text-slate-300">Guild ID: {overview.guild.id}</p>
             </div>
-            <Link href={`/guilds/${guildId}/modules`} className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500">Open Modules</Link>
+            <div className="flex gap-2">
+              <Link href={`/guilds/${guildId}/audit-logs`} className="rounded-md bg-sky-700 px-3 py-2 text-sm font-medium hover:bg-sky-600">Audit Logs</Link>
+              <Link href={`/guilds/${guildId}/modules`} className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500">Open Modules</Link>
+            </div>
           </div>
 
           <div className="grid gap-4 md:grid-cols-2">
