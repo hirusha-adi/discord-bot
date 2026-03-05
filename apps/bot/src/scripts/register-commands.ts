@@ -1,5 +1,6 @@
 import { REST, Routes } from "discord.js";
 import { createDashboardAdminCommand } from "../commands/slash/create-dashboard-admin.js";
+import { helpSlashCommand } from "../commands/slash/help.js";
 import { loadBotEnvironment } from "../core/load-env.js";
 
 loadBotEnvironment();
@@ -24,7 +25,10 @@ function requiredDiscordEnv(): {
 
 const { token, clientId, guildId } = requiredDiscordEnv();
 
-const commands = [createDashboardAdminCommand.data.toJSON()];
+const commands = [
+    helpSlashCommand.data.toJSON(),
+    createDashboardAdminCommand.data.toJSON(),
+];
 const rest = new REST({ version: "10" }).setToken(token);
 
 async function registerGuildCommands() {

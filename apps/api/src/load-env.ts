@@ -5,15 +5,15 @@ import dotenv from "dotenv";
 
 let loaded = false;
 
-export function loadBotEnvironment(): void {
+export function loadApiEnvironment(): void {
     if (loaded) {
         return;
     }
 
-    // Always prefer repo-root .env so filtered pnpm commands work from apps/bot.
+    // Prefer the repository root .env when scripts run from apps/api.
     const here = fileURLToPath(new URL(".", import.meta.url));
-    const rootDir = resolve(here, "../../../../");
-    const rootEnvPath = resolve(here, "../../../../.env");
+    const rootDir = resolve(here, "../../../");
+    const rootEnvPath = resolve(here, "../../../.env");
 
     if (existsSync(rootEnvPath)) {
         dotenv.config({ path: rootEnvPath });

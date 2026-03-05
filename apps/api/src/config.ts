@@ -1,4 +1,6 @@
-import "dotenv/config";
+import { loadApiEnvironment } from "./load-env.js";
+
+loadApiEnvironment();
 
 function required(name: string): string {
     const value = process.env[name];

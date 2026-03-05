@@ -1,15 +1,18 @@
 interface ModuleToggleCardProps {
     moduleKey: string;
+    title?: string;
+    description?: string;
     enabled: boolean;
     pending?: boolean;
     onToggle: (nextValue: boolean) => void;
 }
 
-export function ModuleToggleCard({ moduleKey, enabled, pending, onToggle }: ModuleToggleCardProps) {
+export function ModuleToggleCard({ moduleKey, title, description, enabled, pending, onToggle }: ModuleToggleCardProps) {
     return (
         <article className="card module-card">
-            <h3>{moduleKey}</h3>
-            <p className="muted-text">Status: {enabled ? "Enabled" : "Disabled"}</p>
+            <h3>{title ?? moduleKey}</h3>
+            <p className="muted-text">{description ?? "No description provided."}</p>
+            <p className="module-status">Status: {enabled ? "Enabled" : "Disabled"}</p>
             <button
                 type="button"
                 disabled={pending}

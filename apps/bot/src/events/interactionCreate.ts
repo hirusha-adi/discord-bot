@@ -1,4 +1,4 @@
-import { Events, Interaction } from "discord.js";
+import { Events, Interaction, MessageFlags } from "discord.js";
 import { handleSlashCommand } from "../core/commands.js";
 
 export const interactionCreateEvent = {
@@ -13,7 +13,7 @@ export const interactionCreateEvent = {
         } catch (error) {
             const payload = {
                 content: "Something went wrong while executing this command.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             };
 
             if (interaction.deferred || interaction.replied) {

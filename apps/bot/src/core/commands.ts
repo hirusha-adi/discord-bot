@@ -2,12 +2,20 @@ import type {
     ChatInputCommandInteraction,
     Message,
 } from "discord.js";
+import { MessageFlags } from "discord.js";
 import { createDashboardAdminCommand } from "../commands/slash/create-dashboard-admin.js";
+import { helpSlashCommand } from "../commands/slash/help.js";
 import { pingPrefixCommand } from "../commands/prefix/ping.js";
+import { helpPrefixCommand } from "../commands/prefix/help.js";
 import type { PrefixCommandDefinition, SlashCommandDefinition } from "../modules/types.js";
 import { prisma } from "./prisma.js";
 
 const slashCommands: SlashCommandDefinition[] = [
+    {
+        name: helpSlashCommand.data.name,
+        cooldownSeconds: 3,
+        execute: helpSlashCommand.execute,
+    },
     {
         name: createDashboardAdminCommand.data.name,
         cooldownSeconds: 10,
@@ -15,7 +23,7 @@ const slashCommands: SlashCommandDefinition[] = [
     },
 ];
 
-const prefixCommands: PrefixCommandDefinition[] = [pingPrefixCommand];
+const prefixCommands: PrefixCommandDefinition[] = [helpPrefixCommand, pingPrefixCommand];
 
 const slashCommandMap = new Map(slashCommands.map((command) => [command.name, command]));
 const prefixCommandMap = new Map<string, PrefixCommandDefinition>();
@@ -58,7 +66,7 @@ export async function handleSlashCommand(interaction: ChatInputCommandInteractio
     if (isOnCooldown(interaction.user.id, command.name, command.cooldownSeconds)) {
         const payload = {
             content: "This command is on cooldown. Try again in a moment.",
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
         };
 
         if (interaction.deferred || interaction.replied) {

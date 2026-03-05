@@ -1,5 +1,6 @@
 import {
     ChatInputCommandInteraction,
+    MessageFlags,
     PermissionFlagsBits,
     SlashCommandBuilder,
 } from "discord.js";
@@ -16,7 +17,7 @@ export const createDashboardAdminCommand = {
         if (!interaction.inGuild() || !interaction.guildId || !interaction.guild) {
             await interaction.reply({
                 content: "This command can only be used inside a server.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
@@ -28,12 +29,12 @@ export const createDashboardAdminCommand = {
         if (!hasAdminPerm) {
             await interaction.reply({
                 content: "You must have Administrator permission to run this command.",
-                ephemeral: true,
+                flags: MessageFlags.Ephemeral,
             });
             return;
         }
 
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         const guildId = interaction.guildId;
         const discordUserId = interaction.user.id;

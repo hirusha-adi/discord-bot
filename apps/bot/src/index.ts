@@ -1,4 +1,4 @@
-import { Client, GatewayIntentBits, Partials } from "discord.js";
+import { Client, Events, GatewayIntentBits, Partials } from "discord.js";
 import { env } from "./core/env.js";
 import { botEvents } from "./events/index.js";
 import { builtInModules } from "./modules/index.js";
@@ -19,14 +19,18 @@ const client = new Client({
 
 const moduleManager = new ModuleManager(builtInModules);
 
-client.once("ready", () => {
+client.once(Events.ClientReady, () => {
     console.log(`Bot connected as ${client.user?.tag}`);
     console.log(`Loaded modules: ${moduleManager.getAll().map((mod) => mod.key).join(", ")}`);
 });
 
 for (const eventDef of botEvents) {
     client.on(eventDef.name, async (...args) => {
-        await eventDef.execute(...(args as never));
+        try {
+            await eventDef.execute(...(args as never));
+        } catch (error) {
+            console.error(`Bot event handler failed: ${eventDef.name}`, error);
+        }
     });
 }
 

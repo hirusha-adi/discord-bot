@@ -1,9 +1,85 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { use, useEffect, useMemo, useState } from "react";
 import { apiFetch } from "@/lib/api";
 import { StatCard } from "@/components/dashboard/StatCard";
 import { ModuleToggleCard } from "@/components/modules/ModuleToggleCard";
+
+interface FeatureCatalogItem {
+    moduleKey: string;
+    title: string;
+    description: string;
+    defaultEnabled: boolean;
+}
+
+const FEATURE_CATALOG: FeatureCatalogItem[] = [
+    {
+        moduleKey: "moderation",
+        title: "Moderation",
+        description: "Ban, kick, mute, timeout, warn, and case tracking.",
+        defaultEnabled: true,
+    },
+    {
+        moduleKey: "leveling",
+        title: "Leveling",
+        description: "XP rules, cooldowns, and level reward controls.",
+        defaultEnabled: true,
+    },
+    {
+        moduleKey: "reaction-roles",
+        title: "Reaction Roles",
+        description: "Assign and remove roles using reactions, buttons, and menus.",
+        defaultEnabled: true,
+    },
+    {
+        moduleKey: "logging",
+        title: "Logging",
+        description: "Track moderation, message, role, and member events.",
+        defaultEnabled: true,
+    },
+    {
+        moduleKey: "automation",
+        title: "Automation",
+        description: "Run condition-action rules for routine moderation and ops.",
+        defaultEnabled: true,
+    },
+    {
+        moduleKey: "economy",
+        title: "Economy",
+        description: "Balances, rewards, and transaction-based server economy.",
+        defaultEnabled: true,
+    },
+    {
+        moduleKey: "tickets",
+        title: "Tickets",
+        description: "Create and manage support tickets with transcripts.",
+        defaultEnabled: true,
+    },
+    {
+        moduleKey: "giveaways",
+        title: "Giveaways",
+        description: "Create timed giveaways and pick winners with eligibility rules.",
+        defaultEnabled: true,
+    },
+    {
+        moduleKey: "welcome-goodbye",
+        title: "Welcome and Goodbye",
+        description: "Customize onboarding and departure messaging flows.",
+        defaultEnabled: false,
+    },
+    {
+        moduleKey: "custom-commands",
+        title: "Custom Commands",
+        description: "Create guild-specific text and embed command responses.",
+        defaultEnabled: false,
+    },
+    {
+        moduleKey: "analytics",
+        title: "Analytics",
+        description: "Track server trends, command usage, and moderation activity.",
+        defaultEnabled: false,
+    },
+];
 
 interface GuildPageData {
     guild: { id: string; name: string };
@@ -57,7 +133,8 @@ function normalizeSettings(settings: GuildPageData["settings"]): SettingsForm {
     };
 }
 
-export default function GuildSettingsPage({ params }: { params: { guildId: string } }) {
+export default function GuildSettingsPage({ params }: { params: Promise<{ guildId: string }> }) {
+    const { guildId } = use(params);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
@@ -87,8 +164,8 @@ export default function GuildSettingsPage({ params }: { params: { guildId: strin
             setError(null);
             try {
                 const [guildPayload, analyticsPayload] = await Promise.all([
-                    apiFetch<GuildPageData>(`/guilds/${params.guildId}`),
-                    apiFetch<AnalyticsSummary>(`/guilds/${params.guildId}/analytics/summary`),
+                    apiFetch<GuildPageData>(`/guilds/${guildId}`),
+                    apiFetch<AnalyticsSummary>(`/guilds/${guildId}/analytics/summary`),
                 ]);
 
                 if (cancelled) {
@@ -113,9 +190,22 @@ export default function GuildSettingsPage({ params }: { params: { guildId: strin
         return () => {
             cancelled = true;
         };
-    }, [params.guildId]);
+    }, [guildId]);
 
-    const moduleList = useMemo(() => guildData?.modules ?? [], [guildData]);
+    const moduleStateMap = useMemo(() => {
+        const map = new Map<string, boolean>();
+        for (const moduleRecord of guildData?.modules ?? []) {
+            map.set(moduleRecord.moduleKey, moduleRecord.enabled);
+        }
+        return map;
+    }, [guildData]);
+
+    const featureList = useMemo(() => {
+        return FEATURE_CATALOG.map((feature) => ({
+            ...feature,
+            enabled: moduleStateMap.get(feature.moduleKey) ?? feature.defaultEnabled,
+        }));
+    }, [moduleStateMap]);
 
     async function saveSettings(event: React.FormEvent<HTMLFormElement>) {
         event.preventDefault();
@@ -123,7 +213,7 @@ export default function GuildSettingsPage({ params }: { params: { guildId: strin
         setMessage(null);
 
         try {
-            await apiFetch(`/guilds/${params.guildId}/settings`, {
+            await apiFetch(`/guilds/${guildId}/settings`, {
                 method: "PUT",
                 body: JSON.stringify({
                     ...form,
@@ -146,7 +236,7 @@ export default function GuildSettingsPage({ params }: { params: { guildId: strin
         setMessage(null);
         try {
             const response = await apiFetch<{ module: { moduleKey: string; enabled: boolean } }>(
-                `/guilds/${params.guildId}/modules/${moduleKey}`,
+                `/guilds/${guildId}/modules/${moduleKey}`,
                 {
                     method: "PUT",
                     body: JSON.stringify({ enabled }),
@@ -155,11 +245,17 @@ export default function GuildSettingsPage({ params }: { params: { guildId: strin
 
             setGuildData((previous) => {
                 if (!previous) return previous;
+
+                const exists = previous.modules.some((mod) => mod.moduleKey === moduleKey);
+                const nextModules = exists
+                    ? previous.modules.map((mod) =>
+                        mod.moduleKey === moduleKey ? { ...mod, enabled: response.module.enabled } : mod,
+                    )
+                    : [...previous.modules, { moduleKey, enabled: response.module.enabled }];
+
                 return {
                     ...previous,
-                    modules: previous.modules.map((mod) =>
-                        mod.moduleKey === moduleKey ? { ...mod, enabled: response.module.enabled } : mod,
-                    ),
+                    modules: nextModules,
                 };
             });
 
@@ -255,35 +351,20 @@ export default function GuildSettingsPage({ params }: { params: { guildId: strin
             </section>
 
             <section className="card">
-                <h2>Modules</h2>
+                <h2>Feature Selection</h2>
+                <p className="muted-text">Enable or disable features for this guild. Changes are saved immediately per toggle.</p>
                 <div className="grid module-grid">
-                    {moduleList.map((moduleConfig) => (
+                    {featureList.map((feature) => (
                         <ModuleToggleCard
-                            key={moduleConfig.moduleKey}
-                            moduleKey={moduleConfig.moduleKey}
-                            enabled={moduleConfig.enabled}
-                            pending={moduleSavingKey === moduleConfig.moduleKey}
-                            onToggle={(nextValue) => toggleModule(moduleConfig.moduleKey, nextValue)}
+                            key={feature.moduleKey}
+                            moduleKey={feature.moduleKey}
+                            title={feature.title}
+                            description={feature.description}
+                            enabled={feature.enabled}
+                            pending={moduleSavingKey === feature.moduleKey}
+                            onToggle={(nextValue) => toggleModule(feature.moduleKey, nextValue)}
                         />
                     ))}
-                </div>
-            </section>
-
-            <section className="card">
-                <h2>Feature Sections</h2>
-                <div className="grid section-grid">
-                    <article className="card section-card"><h3>Moderation</h3><p className="muted-text">Ban, kick, mute, timeout, warn, logs, and case tracking.</p></article>
-                    <article className="card section-card"><h3>Auto Moderation</h3><p className="muted-text">Spam, bad words, links, invite blocking, caps detection.</p></article>
-                    <article className="card section-card"><h3>Custom Commands</h3><p className="muted-text">Template responses with variables and permission checks.</p></article>
-                    <article className="card section-card"><h3>Welcome & Goodbye</h3><p className="muted-text">Message templates, embed builder, and DM welcome options.</p></article>
-                    <article className="card section-card"><h3>Leveling</h3><p className="muted-text">XP settings, anti-spam cooldowns, reward roles, and announcements.</p></article>
-                    <article className="card section-card"><h3>Reaction Roles</h3><p className="muted-text">Reaction, button, and menu role assignment controls.</p></article>
-                    <article className="card section-card"><h3>Automation</h3><p className="muted-text">Condition-action rules for joins, keywords, and scheduling.</p></article>
-                    <article className="card section-card"><h3>Economy</h3><p className="muted-text">Daily rewards, balances, transfers, and leaderboard controls.</p></article>
-                    <article className="card section-card"><h3>Giveaways</h3><p className="muted-text">Duration, winner count, eligibility, and reroll behavior.</p></article>
-                    <article className="card section-card"><h3>Tickets</h3><p className="muted-text">Ticket channels, transcripts, staff roles, and categories.</p></article>
-                    <article className="card section-card"><h3>Logging</h3><p className="muted-text">Per-event log channels for messages, roles, and moderation.</p></article>
-                    <article className="card section-card"><h3>Analytics</h3><p className="muted-text">Server growth, usage stats, and moderation trend summaries.</p></article>
                 </div>
             </section>
 

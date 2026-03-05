@@ -207,6 +207,12 @@ main {
     gap: 0.6rem;
 }
 
+.module-status {
+    margin: 0;
+    color: var(--text);
+    font-weight: 600;
+}
+
 .section-grid {
     grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
 }

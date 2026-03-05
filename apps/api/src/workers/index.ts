@@ -1,5 +1,7 @@
-import "dotenv/config";
+import { loadApiEnvironment } from "../load-env.js";
 import { processDueTasks } from "./task-processor.js";
+
+loadApiEnvironment();
 
 async function runLoop() {
     while (true) {
