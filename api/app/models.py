@@ -24,6 +24,9 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(String(320), unique=True, nullable=True)
     password_hash: Mapped[str | None] = mapped_column(String(255), nullable=True)
     discord_user_id: Mapped[str | None] = mapped_column(String(64), unique=True, nullable=True)
+    discord_access_token: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    discord_token_scope: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    discord_token_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
