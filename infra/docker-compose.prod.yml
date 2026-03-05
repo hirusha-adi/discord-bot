@@ -34,6 +34,18 @@ services:
       - app_data:/data
     restart: unless-stopped
 
+  worker:
+    build:
+      context: ../api
+    env_file:
+      - ../.env
+    depends_on:
+      - api
+    volumes:
+      - app_data:/data
+    command: ["python", "-m", "app.announcement_worker"]
+    restart: unless-stopped
+
 volumes:
   app_data:
     driver: local

@@ -170,6 +170,7 @@ class ScheduledAnnouncement(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     guild_id: Mapped[int] = mapped_column(ForeignKey("guilds.id", ondelete="CASCADE"), nullable=False)
+    channel_discord_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     content_markdown: Mapped[str] = mapped_column(Text, nullable=False)
     image_urls: Mapped[list | None] = mapped_column(JSON, nullable=True)
     ping_everyone: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

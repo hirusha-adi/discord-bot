@@ -34,5 +34,17 @@ services:
       - sqlite_data:/data
     restart: unless-stopped
 
+  worker:
+    build:
+      context: ./api
+    env_file:
+      - .env.example
+    depends_on:
+      - api
+    volumes:
+      - sqlite_data:/data
+    command: ["python", "-m", "app.announcement_worker"]
+    restart: unless-stopped
+
 volumes:
   sqlite_data:

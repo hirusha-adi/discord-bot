@@ -46,6 +46,7 @@ export default function GuildOverviewPage({ params }) {
             </div>
             <div className="flex gap-2">
               <Link href={`/guilds/${guildId}/audit-logs`} className="rounded-md bg-sky-700 px-3 py-2 text-sm font-medium hover:bg-sky-600">Audit Logs</Link>
+              <Link href={`/guilds/${guildId}/announcements`} className="rounded-md bg-indigo-700 px-3 py-2 text-sm font-medium hover:bg-indigo-600">Announcements</Link>
               <Link href={`/guilds/${guildId}/modules`} className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500">Open Modules</Link>
             </div>
           </div>
