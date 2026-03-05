@@ -25,6 +25,8 @@ export default function GuildModulesPage({ params }) {
   const { guildId } = params;
   const [state, setState] = useState(initialState);
   const [status, setStatus] = useState('Loading module configs...');
+  const [membersFile, setMembersFile] = useState(null);
+  const [verificationActionStatus, setVerificationActionStatus] = useState('');
 
   const moduleLabels = useMemo(
     () => ({
@@ -151,6 +153,48 @@ export default function GuildModulesPage({ params }) {
     setState((prev) => ({ ...prev, [module]: { ...prev[module], enabled: data.enabled } }));
   };
 
+  const onUploadMembersList = async () => {
+    if (!membersFile) {
+      setVerificationActionStatus('Select a .txt members list file first.');
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append('file', membersFile);
+
+    const response = await fetch(`${API_BASE}/guilds/${guildId}/verification/members/upload`, {
+      method: 'POST',
+      credentials: 'include',
+      body: formData
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      setVerificationActionStatus(data.detail || 'Failed to upload members list.');
+      return;
+    }
+
+    setVerificationActionStatus(
+      `Uploaded ${data.imported_count} emails. Sync request queued (#${data.sync_request_id}).`
+    );
+    setMembersFile(null);
+  };
+
+  const onRunRoleSync = async () => {
+    const response = await fetch(`${API_BASE}/guilds/${guildId}/verification/sync`, {
+      method: 'POST',
+      credentials: 'include'
+    });
+
+    const data = await response.json();
+    if (!response.ok) {
+      setVerificationActionStatus(data.detail || 'Failed to trigger role sync.');
+      return;
+    }
+
+    setVerificationActionStatus(`Manual role sync queued (#${data.sync_request_id}).`);
+  };
+
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-6 px-6 py-10">
       <header className="rounded-xl border border-slate-800 bg-slate-900 p-6">
@@ -206,6 +250,28 @@ export default function GuildModulesPage({ params }) {
                   }
                   className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none ring-sky-500 focus:ring"
                 />
+                <label className="mt-2 text-sm text-slate-300">Member List File (.txt, one email per line)</label>
+                <input
+                  type="file"
+                  accept=".txt,text/plain"
+                  onChange={(e) => setMembersFile(e.target.files?.[0] || null)}
+                  className="rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm file:mr-3 file:rounded file:border-0 file:bg-slate-700 file:px-3 file:py-1.5 file:text-sm"
+                />
+                <div className="mt-1 flex flex-wrap gap-2">
+                  <button
+                    onClick={onUploadMembersList}
+                    className="rounded-md bg-sky-700 px-3 py-2 text-sm font-medium hover:bg-sky-600"
+                  >
+                    Upload Members List
+                  </button>
+                  <button
+                    onClick={onRunRoleSync}
+                    className="rounded-md bg-amber-700 px-3 py-2 text-sm font-medium hover:bg-amber-600"
+                  >
+                    Run role sync now
+                  </button>
+                </div>
+                {verificationActionStatus ? <p className="text-sm text-slate-300">{verificationActionStatus}</p> : null}
               </div>
             )}
 

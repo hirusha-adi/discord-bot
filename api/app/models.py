@@ -181,3 +181,36 @@ class ScheduledAnnouncement(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
 
     __table_args__ = (Index("ix_scheduled_announcement_guild_id_scheduled_at", "guild_id", "scheduled_at"),)
+
+
+class VerificationLink(Base):
+    __tablename__ = "verification_links"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    guild_id: Mapped[int] = mapped_column(ForeignKey("guilds.id", ondelete="CASCADE"), nullable=False, index=True)
+    member_discord_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    email: Mapped[str] = mapped_column(String(320), nullable=False)
+    verified_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint("guild_id", "member_discord_id", name="uq_verification_links_guild_member"),
+        Index("ix_verification_links_guild_id_email", "guild_id", "email"),
+    )
+
+
+class VerificationSyncRequest(Base):
+    __tablename__ = "verification_sync_requests"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    guild_id: Mapped[int] = mapped_column(ForeignKey("guilds.id", ondelete="CASCADE"), nullable=False, index=True)
+    requested_by_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    requested_by_member_discord_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="manual", nullable=False)
+    status: Mapped[str] = mapped_column(String(32), default="pending", nullable=False)
+    requested_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    summary_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    error_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (Index("ix_verification_sync_requests_guild_id_status", "guild_id", "status"),)

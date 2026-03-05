@@ -9,6 +9,7 @@ from app.deps import get_current_user
 from app.guilds import router as guilds_router
 from app.models import User
 from app.modules import router as modules_router
+from app.verification import router as verification_router
 
 app = FastAPI(title="Discord Bot API", version="0.5.0")
 
@@ -24,6 +25,7 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(guilds_router)
 app.include_router(modules_router)
+app.include_router(verification_router)
 
 
 @app.get("/health")

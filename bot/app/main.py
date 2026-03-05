@@ -1,6 +1,8 @@
 import asyncio
+import hashlib
 import json
 import os
+import re
 from datetime import UTC, datetime
 
 import discord
@@ -11,6 +13,8 @@ from sqlalchemy.exc import SQLAlchemyError
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./app.db")
 DISCORD_BOT_TOKEN = os.getenv("DISCORD_BOT_TOKEN", "")
 DISCORD_TEST_GUILD_ID = os.getenv("DISCORD_TEST_GUILD_ID", "").strip()
+
+EMAIL_PATTERN = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.IGNORECASE)
 
 start_time = datetime.now(UTC)
 
@@ -32,6 +36,562 @@ def db_startup_ping() -> bool:
     except SQLAlchemyError as exc:
         print(f"[bot] DB startup ping failed: {exc}")
         return False
+
+
+def _normalize_email(value: str) -> str:
+    return value.strip().lower()
+
+
+def _is_valid_email(value: str) -> bool:
+    return bool(EMAIL_PATTERN.match(value))
+
+
+def _parse_json_list(raw_value) -> list[str]:
+    if raw_value is None:
+        return []
+    if isinstance(raw_value, list):
+        return [str(item).strip() for item in raw_value if str(item).strip()]
+    if isinstance(raw_value, str):
+        try:
+            parsed = json.loads(raw_value)
+            if isinstance(parsed, list):
+                return [str(item).strip() for item in parsed if str(item).strip()]
+        except json.JSONDecodeError:
+            return []
+    return []
+
+
+def _parse_emails_from_text(text_data: str) -> list[str]:
+    emails: set[str] = set()
+    for raw_line in text_data.splitlines():
+        candidate = _normalize_email(raw_line)
+        if not candidate:
+            continue
+        if _is_valid_email(candidate):
+            emails.add(candidate)
+    return sorted(emails)
+
+
+def _ensure_guild_row(discord_guild_id: str, guild_name: str) -> int:
+    with engine.begin() as connection:
+        guild_row = connection.execute(
+            text("SELECT id FROM guilds WHERE discord_guild_id = :discord_guild_id"),
+            {"discord_guild_id": discord_guild_id},
+        ).mappings().first()
+
+        if guild_row:
+            connection.execute(
+                text(
+                    """
+                    UPDATE guilds
+                    SET name = :name, bot_present = 1
+                    WHERE id = :id
+                    """
+                ),
+                {"id": guild_row["id"], "name": guild_name},
+            )
+            return int(guild_row["id"])
+
+        inserted = connection.execute(
+            text(
+                """
+                INSERT INTO guilds (discord_guild_id, name, bot_present, created_at, updated_at)
+                VALUES (:discord_guild_id, :name, 1, :now, :now)
+                """
+            ),
+            {"discord_guild_id": discord_guild_id, "name": guild_name, "now": datetime.now(UTC)},
+        )
+        return int(inserted.lastrowid)
+
+
+def _get_verification_config(discord_guild_id: str) -> dict:
+    query = text(
+        """
+        SELECT
+            COALESCE(v.enabled, 0) AS enabled,
+            v.role_ids AS role_ids,
+            COALESCE(v.remove_roles_when_unlisted, 1) AS remove_roles_when_unlisted
+        FROM guilds g
+        LEFT JOIN verification_configs v ON v.guild_id = g.id
+        WHERE g.discord_guild_id = :discord_guild_id
+        """
+    )
+
+    with engine.connect() as connection:
+        row = connection.execute(query, {"discord_guild_id": discord_guild_id}).mappings().first()
+
+    if not row:
+        return {"enabled": False, "role_ids": [], "remove_roles_when_unlisted": True}
+
+    role_ids = []
+    for role_id in _parse_json_list(row["role_ids"]):
+        if role_id.isdigit():
+            role_ids.append(int(role_id))
+
+    return {
+        "enabled": bool(row["enabled"]),
+        "role_ids": role_ids,
+        "remove_roles_when_unlisted": bool(row["remove_roles_when_unlisted"]),
+    }
+
+
+def _email_is_registered(discord_guild_id: str, email: str) -> bool:
+    query = text(
+        """
+        SELECT 1
+        FROM registered_member_emails e
+        JOIN guilds g ON g.id = e.guild_id
+        WHERE g.discord_guild_id = :discord_guild_id
+          AND e.email = :email
+        LIMIT 1
+        """
+    )
+
+    with engine.connect() as connection:
+        row = connection.execute(
+            query,
+            {
+                "discord_guild_id": discord_guild_id,
+                "email": email,
+            },
+        ).first()
+
+    return row is not None
+
+
+def _upsert_verification_link(discord_guild_id: str, guild_name: str, member_discord_id: str, email: str) -> None:
+    guild_row_id = _ensure_guild_row(discord_guild_id, guild_name)
+
+    with engine.begin() as connection:
+        existing = connection.execute(
+            text(
+                """
+                SELECT id
+                FROM verification_links
+                WHERE guild_id = :guild_id
+                  AND member_discord_id = :member_discord_id
+                """
+            ),
+            {"guild_id": guild_row_id, "member_discord_id": member_discord_id},
+        ).mappings().first()
+
+        now = datetime.now(UTC)
+        if existing:
+            connection.execute(
+                text(
+                    """
+                    UPDATE verification_links
+                    SET email = :email, verified_at = :verified_at
+                    WHERE id = :id
+                    """
+                ),
+                {"id": existing["id"], "email": email, "verified_at": now},
+            )
+        else:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO verification_links (guild_id, member_discord_id, email, verified_at)
+                    VALUES (:guild_id, :member_discord_id, :email, :verified_at)
+                    """
+                ),
+                {
+                    "guild_id": guild_row_id,
+                    "member_discord_id": member_discord_id,
+                    "email": email,
+                    "verified_at": now,
+                },
+            )
+
+
+def _remove_verification_link(discord_guild_id: str, member_discord_id: str) -> None:
+    with engine.begin() as connection:
+        guild_row = connection.execute(
+            text("SELECT id FROM guilds WHERE discord_guild_id = :discord_guild_id"),
+            {"discord_guild_id": discord_guild_id},
+        ).mappings().first()
+
+        if not guild_row:
+            return
+
+        connection.execute(
+            text(
+                """
+                DELETE FROM verification_links
+                WHERE guild_id = :guild_id
+                  AND member_discord_id = :member_discord_id
+                """
+            ),
+            {"guild_id": guild_row["id"], "member_discord_id": member_discord_id},
+        )
+
+
+def _import_registered_emails(
+    discord_guild_id: str,
+    guild_name: str,
+    filename: str,
+    file_hash: str,
+    emails: list[str],
+) -> int:
+    guild_row_id = _ensure_guild_row(discord_guild_id, guild_name)
+
+    with engine.begin() as connection:
+        list_insert = connection.execute(
+            text(
+                """
+                INSERT INTO registered_member_lists (guild_id, source_type, filename, file_hash, uploaded_at)
+                VALUES (:guild_id, :source_type, :filename, :file_hash, :uploaded_at)
+                """
+            ),
+            {
+                "guild_id": guild_row_id,
+                "source_type": "bot_command",
+                "filename": filename,
+                "file_hash": file_hash,
+                "uploaded_at": datetime.now(UTC),
+            },
+        )
+        member_list_id = int(list_insert.lastrowid)
+
+        # Replacement strategy: each import fully refreshes guild registered emails.
+        connection.execute(
+            text("DELETE FROM registered_member_emails WHERE guild_id = :guild_id"),
+            {"guild_id": guild_row_id},
+        )
+
+        for email in emails:
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO registered_member_emails (guild_id, member_list_id, email, created_at)
+                    VALUES (:guild_id, :member_list_id, :email, :created_at)
+                    """
+                ),
+                {
+                    "guild_id": guild_row_id,
+                    "member_list_id": member_list_id,
+                    "email": email,
+                    "created_at": datetime.now(UTC),
+                },
+            )
+
+    return guild_row_id
+
+
+def _create_sync_request(
+    guild_row_id: int,
+    source: str,
+    requested_by_member_discord_id: str | None = None,
+    requested_by_user_id: int | None = None,
+) -> int:
+    with engine.begin() as connection:
+        inserted = connection.execute(
+            text(
+                """
+                INSERT INTO verification_sync_requests (
+                    guild_id,
+                    requested_by_user_id,
+                    requested_by_member_discord_id,
+                    source,
+                    status,
+                    requested_at
+                ) VALUES (
+                    :guild_id,
+                    :requested_by_user_id,
+                    :requested_by_member_discord_id,
+                    :source,
+                    'pending',
+                    :requested_at
+                )
+                """
+            ),
+            {
+                "guild_id": guild_row_id,
+                "requested_by_user_id": requested_by_user_id,
+                "requested_by_member_discord_id": requested_by_member_discord_id,
+                "source": source,
+                "requested_at": datetime.now(UTC),
+            },
+        )
+        return int(inserted.lastrowid)
+
+
+def _set_sync_request_status(
+    request_id: int,
+    status_value: str,
+    summary: dict | None = None,
+    error_text: str | None = None,
+) -> None:
+    with engine.begin() as connection:
+        now = datetime.now(UTC)
+        updates = {
+            "id": request_id,
+            "status": status_value,
+            "summary_json": json.dumps(summary) if summary is not None else None,
+            "error_text": error_text,
+            "now": now,
+        }
+
+        if status_value == "running":
+            connection.execute(
+                text(
+                    """
+                    UPDATE verification_sync_requests
+                    SET status = :status,
+                        started_at = :now,
+                        error_text = NULL
+                    WHERE id = :id
+                    """
+                ),
+                updates,
+            )
+        elif status_value in {"completed", "failed"}:
+            connection.execute(
+                text(
+                    """
+                    UPDATE verification_sync_requests
+                    SET status = :status,
+                        finished_at = :now,
+                        summary_json = :summary_json,
+                        error_text = :error_text
+                    WHERE id = :id
+                    """
+                ),
+                updates,
+            )
+
+
+def _get_pending_sync_requests() -> list[dict]:
+    with engine.connect() as connection:
+        rows = connection.execute(
+            text(
+                """
+                SELECT
+                    r.id,
+                    r.guild_id,
+                    g.discord_guild_id
+                FROM verification_sync_requests r
+                JOIN guilds g ON g.id = r.guild_id
+                WHERE r.status = 'pending'
+                ORDER BY r.requested_at ASC
+                """
+            )
+        ).mappings().all()
+
+    return [dict(row) for row in rows]
+
+
+def _get_sync_data_for_guild(guild_row_id: int) -> dict:
+    with engine.connect() as connection:
+        config_row = connection.execute(
+            text(
+                """
+                SELECT
+                    COALESCE(enabled, 0) AS enabled,
+                    role_ids,
+                    COALESCE(remove_roles_when_unlisted, 1) AS remove_roles_when_unlisted
+                FROM verification_configs
+                WHERE guild_id = :guild_id
+                """
+            ),
+            {"guild_id": guild_row_id},
+        ).mappings().first()
+
+        valid_emails = {
+            row["email"]
+            for row in connection.execute(
+                text("SELECT email FROM registered_member_emails WHERE guild_id = :guild_id"),
+                {"guild_id": guild_row_id},
+            ).mappings().all()
+        }
+
+        links = {
+            row["member_discord_id"]: row["email"]
+            for row in connection.execute(
+                text("SELECT member_discord_id, email FROM verification_links WHERE guild_id = :guild_id"),
+                {"guild_id": guild_row_id},
+            ).mappings().all()
+        }
+
+    role_ids: list[int] = []
+    if config_row and config_row["role_ids"] is not None:
+        for role_id in _parse_json_list(config_row["role_ids"]):
+            if role_id.isdigit():
+                role_ids.append(int(role_id))
+
+    return {
+        "enabled": bool(config_row["enabled"]) if config_row else False,
+        "remove_roles_when_unlisted": bool(config_row["remove_roles_when_unlisted"]) if config_row else True,
+        "role_ids": role_ids,
+        "valid_emails": valid_emails,
+        "links": links,
+    }
+
+
+def _member_is_registered(member_id: int, links: dict[str, str], valid_emails: set[str]) -> bool:
+    linked_email = links.get(str(member_id))
+    if not linked_email:
+        return False
+    return linked_email in valid_emails
+
+
+class Stage7Bot(commands.Bot):
+    def __init__(self) -> None:
+        intents = discord.Intents.all()
+        super().__init__(command_prefix="!", intents=intents)
+        self.sync_worker_task: asyncio.Task | None = None
+
+    async def setup_hook(self) -> None:
+        if DISCORD_TEST_GUILD_ID:
+            guild_obj = discord.Object(id=int(DISCORD_TEST_GUILD_ID))
+            self.tree.copy_global_to(guild=guild_obj)
+            await self.tree.sync(guild=guild_obj)
+            print(f"[bot] Synced slash commands to test guild {DISCORD_TEST_GUILD_ID}")
+        else:
+            await self.tree.sync()
+            print("[bot] Synced global slash commands")
+
+        self.sync_worker_task = asyncio.create_task(self.verification_sync_worker())
+
+    async def close(self) -> None:
+        if self.sync_worker_task is not None:
+            self.sync_worker_task.cancel()
+        await super().close()
+
+    async def on_ready(self) -> None:
+        print(f"[bot] Logged in as {self.user} (id={self.user.id if self.user else 'n/a'})")
+
+    async def on_member_join(self, member: discord.Member) -> None:
+        try:
+            await send_configured_dm(member, "welcome")
+        except SQLAlchemyError as exc:
+            print(f"[bot] Welcome config DB read failed for guild {member.guild.id}: {exc}")
+
+    async def on_member_remove(self, member: discord.Member) -> None:
+        try:
+            _remove_verification_link(str(member.guild.id), str(member.id))
+        except SQLAlchemyError as exc:
+            print(f"[bot] Verification cleanup on leave failed for guild {member.guild.id}: {exc}")
+
+        try:
+            await send_configured_dm(member, "leave")
+        except SQLAlchemyError as exc:
+            print(f"[bot] Leave config DB read failed for guild {member.guild.id}: {exc}")
+
+    async def on_member_ban(self, guild: discord.Guild, user: discord.User | discord.Member) -> None:
+        try:
+            _remove_verification_link(str(guild.id), str(user.id))
+        except SQLAlchemyError as exc:
+            print(f"[bot] Verification cleanup on ban failed for guild {guild.id}: {exc}")
+
+    async def verification_sync_worker(self) -> None:
+        while not self.is_closed():
+            try:
+                pending = _get_pending_sync_requests()
+                for request in pending:
+                    await self.process_sync_request(request)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[bot] Verification sync worker error: {exc}")
+
+            await asyncio.sleep(5)
+
+    async def process_sync_request(self, request: dict) -> None:
+        request_id = int(request["id"])
+        guild_row_id = int(request["guild_id"])
+        discord_guild_id = str(request["discord_guild_id"])
+
+        _set_sync_request_status(request_id, "running")
+
+        try:
+            guild = self.get_guild(int(discord_guild_id))
+            if guild is None:
+                guild = await self.fetch_guild(int(discord_guild_id))
+
+            summary = await run_verification_role_sync(guild, guild_row_id)
+            _set_sync_request_status(request_id, "completed", summary=summary)
+            print(f"[bot] Verification sync completed for guild {guild.id}: {summary}")
+        except Exception as exc:  # noqa: BLE001
+            _set_sync_request_status(request_id, "failed", error_text=str(exc))
+            print(f"[bot] Verification sync failed for guild {discord_guild_id}: {exc}")
+
+
+bot = Stage7Bot()
+
+
+class VerifyEmailModal(discord.ui.Modal, title="Verify Email"):
+    email = discord.ui.TextInput(
+        label="Registered email",
+        placeholder="name@example.com",
+        required=True,
+        max_length=320,
+    )
+
+    def __init__(self, guild: discord.Guild, member: discord.Member) -> None:
+        super().__init__(timeout=180)
+        self.guild = guild
+        self.member = member
+
+    async def on_submit(self, interaction: discord.Interaction) -> None:
+        config = _get_verification_config(str(self.guild.id))
+        if not config["enabled"]:
+            await interaction.response.send_message(
+                "Verification module is disabled for this guild.",
+                ephemeral=True,
+            )
+            return
+
+        normalized_email = _normalize_email(str(self.email))
+        if not _is_valid_email(normalized_email):
+            await interaction.response.send_message("Please provide a valid email address.", ephemeral=True)
+            return
+
+        if not _email_is_registered(str(self.guild.id), normalized_email):
+            await interaction.response.send_message(
+                "Email not found in the registered member list. Contact an admin.",
+                ephemeral=True,
+            )
+            return
+
+        missing_roles = []
+        added_count = 0
+        errors = 0
+
+        for role_id in config["role_ids"]:
+            role = self.guild.get_role(role_id)
+            if role is None:
+                missing_roles.append(str(role_id))
+                continue
+
+            if role in self.member.roles:
+                continue
+
+            try:
+                await self.member.add_roles(role, reason="Email verification")
+                added_count += 1
+            except discord.Forbidden as exc:
+                errors += 1
+                print(f"[bot] Failed to assign role {role_id} to user {self.member.id}: {exc}")
+            except discord.HTTPException as exc:
+                errors += 1
+                print(f"[bot] Role assignment HTTP error for role {role_id} user {self.member.id}: {exc}")
+
+        try:
+            _upsert_verification_link(
+                discord_guild_id=str(self.guild.id),
+                guild_name=self.guild.name,
+                member_discord_id=str(self.member.id),
+                email=normalized_email,
+            )
+        except SQLAlchemyError as exc:
+            print(f"[bot] Failed to store verification link for user {self.member.id}: {exc}")
+
+        parts = ["Verification successful.", f"Roles added: {added_count}"]
+        if missing_roles:
+            parts.append(f"Missing role IDs in guild: {', '.join(missing_roles)}")
+        if errors:
+            parts.append("Some roles could not be assigned due to permission/hierarchy issues.")
+
+        await interaction.response.send_message("\n".join(parts), ephemeral=True)
 
 
 def get_module_settings_for_guild(discord_guild_id: str) -> dict[str, bool]:
@@ -74,21 +634,6 @@ def get_module_settings_for_guild(discord_guild_id: str) -> dict[str, bool]:
     }
 
 
-def _parse_image_urls(raw_value) -> list[str]:
-    if raw_value is None:
-        return []
-    if isinstance(raw_value, list):
-        return [str(url).strip() for url in raw_value if str(url).strip()]
-    if isinstance(raw_value, str):
-        try:
-            parsed = json.loads(raw_value)
-            if isinstance(parsed, list):
-                return [str(url).strip() for url in parsed if str(url).strip()]
-        except json.JSONDecodeError:
-            return []
-    return []
-
-
 def get_dm_config_for_guild(discord_guild_id: str, event_type: str) -> dict:
     if event_type not in {"welcome", "leave"}:
         raise ValueError("event_type must be 'welcome' or 'leave'")
@@ -115,7 +660,7 @@ def get_dm_config_for_guild(discord_guild_id: str, event_type: str) -> dict:
     return {
         "enabled": bool(row["enabled"]),
         "markdown_text": row["markdown_text"],
-        "image_urls": _parse_image_urls(row["image_urls"]),
+        "image_urls": _parse_json_list(row["image_urls"]),
     }
 
 
@@ -146,38 +691,64 @@ async def send_configured_dm(member: discord.Member, event_type: str) -> None:
         print(f"[bot] Failed to send {event_type} DM to user {member.id}: {exc}")
 
 
-class Stage6Bot(commands.Bot):
-    def __init__(self) -> None:
-        intents = discord.Intents.all()
-        super().__init__(command_prefix="!", intents=intents)
+async def run_verification_role_sync(guild: discord.Guild, guild_row_id: int) -> dict:
+    data = _get_sync_data_for_guild(guild_row_id)
+    role_ids = data["role_ids"]
 
-    async def setup_hook(self) -> None:
-        if DISCORD_TEST_GUILD_ID:
-            guild_obj = discord.Object(id=int(DISCORD_TEST_GUILD_ID))
-            self.tree.copy_global_to(guild=guild_obj)
-            await self.tree.sync(guild=guild_obj)
-            print(f"[bot] Synced slash commands to test guild {DISCORD_TEST_GUILD_ID}")
-        else:
-            await self.tree.sync()
-            print("[bot] Synced global slash commands")
+    summary = {
+        "guild_id": str(guild.id),
+        "added": 0,
+        "removed": 0,
+        "skipped": 0,
+        "errors": 0,
+    }
 
-    async def on_ready(self) -> None:
-        print(f"[bot] Logged in as {self.user} (id={self.user.id if self.user else 'n/a'})")
+    if not data["enabled"]:
+        summary["skipped"] += 1
+        summary["note"] = "verification module disabled"
+        return summary
 
-    async def on_member_join(self, member: discord.Member) -> None:
+    if not role_ids:
+        summary["skipped"] += 1
+        summary["note"] = "no verification roles configured"
+        return summary
+
+    role_objects = [guild.get_role(role_id) for role_id in role_ids]
+    role_objects = [role for role in role_objects if role is not None]
+    if not role_objects:
+        summary["skipped"] += 1
+        summary["note"] = "configured roles not found in guild"
+        return summary
+
+    try:
+        members = [member async for member in guild.fetch_members(limit=None)]
+    except discord.Forbidden:
+        members = list(guild.members)
+
+    for member in members:
+        if member.bot:
+            continue
+
+        registered = _member_is_registered(member.id, data["links"], data["valid_emails"])
+
         try:
-            await send_configured_dm(member, "welcome")
-        except SQLAlchemyError as exc:
-            print(f"[bot] Welcome config DB read failed for guild {member.guild.id}: {exc}")
+            for role in role_objects:
+                has_role = role in member.roles
 
-    async def on_member_remove(self, member: discord.Member) -> None:
-        try:
-            await send_configured_dm(member, "leave")
-        except SQLAlchemyError as exc:
-            print(f"[bot] Leave config DB read failed for guild {member.guild.id}: {exc}")
+                if registered and not has_role:
+                    await member.add_roles(role, reason="Verification sync")
+                    summary["added"] += 1
+                elif (not registered) and data["remove_roles_when_unlisted"] and has_role:
+                    await member.remove_roles(role, reason="Verification sync")
+                    summary["removed"] += 1
+        except discord.Forbidden:
+            summary["errors"] += 1
+        except discord.HTTPException:
+            summary["errors"] += 1
 
+        await asyncio.sleep(0.2)
 
-bot = Stage6Bot()
+    return summary
 
 
 @bot.tree.command(name="ping", description="Check bot latency")
@@ -193,6 +764,8 @@ async def help_command(interaction: discord.Interaction) -> None:
         "`/ping` - Check bot latency",
         "`/help` - List available commands",
         "`/uptime` - Show bot uptime",
+        "`/verify` - Verify with your email",
+        "`/add-members-list` - Import verification email list (admin only)",
     ]
 
     if interaction.guild_id is not None:
@@ -214,6 +787,97 @@ async def uptime(interaction: discord.Interaction) -> None:
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     await interaction.response.send_message(f"Uptime: {hours}h {minutes}m {seconds}s")
+
+
+@bot.tree.command(name="verify", description="Verify your email to receive configured roles")
+async def verify(interaction: discord.Interaction) -> None:
+    if interaction.guild is None or interaction.user is None:
+        await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+        return
+
+    config = _get_verification_config(str(interaction.guild.id))
+    if not config["enabled"]:
+        await interaction.response.send_message("Verification module is disabled for this guild.", ephemeral=True)
+        return
+
+    member = interaction.user if isinstance(interaction.user, discord.Member) else None
+    if member is None:
+        await interaction.response.send_message("Could not resolve your member data in this guild.", ephemeral=True)
+        return
+
+    await interaction.response.send_modal(VerifyEmailModal(interaction.guild, member))
+
+
+@bot.tree.command(name="add-members-list", description="Import registered emails from a text file")
+@discord.app_commands.describe(file="Text file attachment with one email per line")
+async def add_members_list(interaction: discord.Interaction, file: discord.Attachment) -> None:
+    if interaction.guild is None or interaction.user is None:
+        await interaction.response.send_message("This command can only be used in a server.", ephemeral=True)
+        return
+
+    member = interaction.user if isinstance(interaction.user, discord.Member) else None
+    if member is None:
+        await interaction.response.send_message("Could not resolve your member data in this guild.", ephemeral=True)
+        return
+
+    if not (member.guild_permissions.administrator or member.guild_permissions.manage_guild):
+        await interaction.response.send_message("You need Admin or Manage Guild permissions.", ephemeral=True)
+        return
+
+    config = _get_verification_config(str(interaction.guild.id))
+    if not config["enabled"]:
+        await interaction.response.send_message("Verification module is disabled for this guild.", ephemeral=True)
+        return
+
+    await interaction.response.defer(ephemeral=True, thinking=True)
+
+    try:
+        content = await file.read()
+    except discord.HTTPException as exc:
+        await interaction.followup.send(f"Failed to read attachment: {exc}", ephemeral=True)
+        return
+
+    if not content:
+        await interaction.followup.send("The uploaded file is empty.", ephemeral=True)
+        return
+
+    decoded_text = content.decode("utf-8", errors="ignore")
+    emails = _parse_emails_from_text(decoded_text)
+    if not emails:
+        await interaction.followup.send("No valid emails found in the uploaded file.", ephemeral=True)
+        return
+
+    file_hash = hashlib.sha256(content).hexdigest()
+
+    try:
+        guild_row_id = _import_registered_emails(
+            discord_guild_id=str(interaction.guild.id),
+            guild_name=interaction.guild.name,
+            filename=file.filename or "members.txt",
+            file_hash=file_hash,
+            emails=emails,
+        )
+
+        request_id = _create_sync_request(
+            guild_row_id=guild_row_id,
+            source="bot_command_upload",
+            requested_by_member_discord_id=str(member.id),
+        )
+
+        await bot.process_sync_request(
+            {
+                "id": request_id,
+                "guild_id": guild_row_id,
+                "discord_guild_id": str(interaction.guild.id),
+            }
+        )
+
+        await interaction.followup.send(
+            f"Imported {len(emails)} emails and started verification role sync.",
+            ephemeral=True,
+        )
+    except SQLAlchemyError as exc:
+        await interaction.followup.send(f"Failed to import list: {exc}", ephemeral=True)
 
 
 async def main() -> None:
