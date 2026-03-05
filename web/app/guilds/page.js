@@ -30,17 +30,27 @@ export default function GuildsPage() {
   }, []);
 
   return (
-    <main style={{ fontFamily: 'sans-serif', maxWidth: 720, margin: '40px auto', padding: '0 16px' }}>
-      <h1>Guild Selection</h1>
-      <p>{status}</p>
+    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-6 py-10">
+      <header className="rounded-xl border border-slate-800 bg-slate-900 p-6">
+        <h1 className="text-2xl font-semibold">Guild Selection</h1>
+        <p className="mt-2 text-sm text-slate-300">{status}</p>
+      </header>
 
-      <ul style={{ paddingLeft: 20 }}>
-        {guilds.map((guild) => (
-          <li key={guild.id} style={{ marginBottom: 10 }}>
-            <Link href={`/guilds/${guild.id}`}>{guild.name}</Link>
-          </li>
-        ))}
-      </ul>
+      <section className="rounded-xl border border-slate-800 bg-slate-900 p-6">
+        <ul className="space-y-3">
+          {guilds.map((guild) => (
+            <li key={guild.id} className="flex items-center justify-between rounded-lg border border-slate-800 bg-slate-950 px-4 py-3">
+              <span className="font-medium">{guild.name}</span>
+              <div className="flex gap-2">
+                <Link href={`/guilds/${guild.id}`} className="rounded-md bg-slate-700 px-3 py-1.5 text-sm hover:bg-slate-600">Overview</Link>
+                <Link href={`/guilds/${guild.id}/modules`} className="rounded-md bg-emerald-600 px-3 py-1.5 text-sm hover:bg-emerald-500">Modules</Link>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </section>
+
+      <Link href="/" className="text-sm text-sky-300 hover:text-sky-200">Back to Login</Link>
     </main>
   );
 }

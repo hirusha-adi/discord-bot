@@ -7,6 +7,8 @@ RUN npm install
 
 COPY app ./app
 COPY next.config.js ./
+COPY postcss.config.js ./
+COPY tailwind.config.js ./
 
 EXPOSE 3000
 

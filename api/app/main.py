@@ -8,8 +8,9 @@ from app.db import db_ping
 from app.deps import get_current_user
 from app.guilds import router as guilds_router
 from app.models import User
+from app.modules import router as modules_router
 
-app = FastAPI(title="Discord Bot API", version="0.4.0")
+app = FastAPI(title="Discord Bot API", version="0.5.0")
 
 web_origin = os.getenv("WEB_ORIGIN", "http://localhost:3000")
 app.add_middleware(
@@ -22,6 +23,7 @@ app.add_middleware(
 
 app.include_router(auth_router)
 app.include_router(guilds_router)
+app.include_router(modules_router)
 
 
 @app.get("/health")

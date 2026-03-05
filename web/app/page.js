@@ -45,38 +45,46 @@ export default function HomePage() {
   };
 
   return (
-    <main style={{ fontFamily: 'sans-serif', maxWidth: 620, margin: '40px auto', padding: '0 16px' }}>
-      <h1>Discord Bot Dashboard Login</h1>
-      <p>Stage 3 authentication + guild discovery baseline.</p>
+    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-6 px-6 py-10">
+      <header className="rounded-xl border border-slate-800 bg-slate-900 p-6">
+        <h1 className="text-2xl font-semibold">Discord Bot Dashboard Login</h1>
+        <p className="mt-2 text-sm text-slate-300">Stage 4 module management baseline.</p>
+      </header>
 
-      <label htmlFor="identifier">Username or Email</label>
-      <input
-        id="identifier"
-        value={identifier}
-        onChange={(e) => setIdentifier(e.target.value)}
-        style={{ width: '100%', marginBottom: 12, padding: 8 }}
-      />
+      <section className="rounded-xl border border-slate-800 bg-slate-900 p-6">
+        <div className="grid gap-4">
+          <div>
+            <label htmlFor="identifier" className="mb-1 block text-sm font-medium text-slate-300">Username or Email</label>
+            <input
+              id="identifier"
+              value={identifier}
+              onChange={(e) => setIdentifier(e.target.value)}
+              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-sky-500 focus:ring"
+            />
+          </div>
 
-      <label htmlFor="password">Password</label>
-      <input
-        id="password"
-        type="password"
-        value={password}
-        onChange={(e) => setPassword(e.target.value)}
-        style={{ width: '100%', marginBottom: 16, padding: 8 }}
-      />
+          <div>
+            <label htmlFor="password" className="mb-1 block text-sm font-medium text-slate-300">Password</label>
+            <input
+              id="password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-sky-500 focus:ring"
+            />
+          </div>
 
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-        <button onClick={() => callAuth('/auth/local/register')}>Register + Login</button>
-        <button onClick={() => callAuth('/auth/local/login')}>Login</button>
-        <button onClick={checkSession}>Check Session</button>
-        <button onClick={loginWithDiscord}>Login with Discord</button>
-        <Link href="/guilds" style={{ alignSelf: 'center' }}>Go to Guilds</Link>
-      </div>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={() => callAuth('/auth/local/register')} className="rounded-md bg-sky-600 px-3 py-2 text-sm font-medium hover:bg-sky-500">Register + Login</button>
+            <button onClick={() => callAuth('/auth/local/login')} className="rounded-md bg-slate-700 px-3 py-2 text-sm font-medium hover:bg-slate-600">Login</button>
+            <button onClick={checkSession} className="rounded-md bg-slate-700 px-3 py-2 text-sm font-medium hover:bg-slate-600">Check Session</button>
+            <button onClick={loginWithDiscord} className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-medium hover:bg-indigo-500">Login with Discord</button>
+            <Link href="/guilds" className="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500">Go to Guilds</Link>
+          </div>
 
-      <p style={{ marginTop: 16 }}>
-        <strong>Status:</strong> {message}
-      </p>
+          <p className="text-sm text-slate-200"><span className="font-semibold">Status:</span> {message}</p>
+        </div>
+      </section>
     </main>
   );
 }
