@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8000';
@@ -44,9 +45,9 @@ export default function HomePage() {
   };
 
   return (
-    <main style={{ fontFamily: 'sans-serif', maxWidth: 560, margin: '40px auto', padding: '0 16px' }}>
+    <main style={{ fontFamily: 'sans-serif', maxWidth: 620, margin: '40px auto', padding: '0 16px' }}>
       <h1>Discord Bot Dashboard Login</h1>
-      <p>Stage 2 authentication baseline.</p>
+      <p>Stage 3 authentication + guild discovery baseline.</p>
 
       <label htmlFor="identifier">Username or Email</label>
       <input
@@ -70,6 +71,7 @@ export default function HomePage() {
         <button onClick={() => callAuth('/auth/local/login')}>Login</button>
         <button onClick={checkSession}>Check Session</button>
         <button onClick={loginWithDiscord}>Login with Discord</button>
+        <Link href="/guilds" style={{ alignSelf: 'center' }}>Go to Guilds</Link>
       </div>
 
       <p style={{ marginTop: 16 }}>

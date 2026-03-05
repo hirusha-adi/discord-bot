@@ -6,9 +6,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.auth import router as auth_router
 from app.db import db_ping
 from app.deps import get_current_user
+from app.guilds import router as guilds_router
 from app.models import User
 
-app = FastAPI(title="Discord Bot API", version="0.3.0")
+app = FastAPI(title="Discord Bot API", version="0.4.0")
 
 web_origin = os.getenv("WEB_ORIGIN", "http://localhost:3000")
 app.add_middleware(
@@ -20,6 +21,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(guilds_router)
 
 
 @app.get("/health")
