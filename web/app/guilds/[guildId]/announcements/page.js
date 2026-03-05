@@ -211,7 +211,9 @@ export default function GuildAnnouncementsPage({ params }) {
               <tr>
                 <th className="px-3 py-2">ID</th>
                 <th className="px-3 py-2">Status</th>
+                <th className="px-3 py-2">Retries</th>
                 <th className="px-3 py-2">Scheduled</th>
+                <th className="px-3 py-2">Next Attempt</th>
                 <th className="px-3 py-2">Channel</th>
                 <th className="px-3 py-2">Sent At</th>
                 <th className="px-3 py-2">Error</th>
@@ -223,7 +225,9 @@ export default function GuildAnnouncementsPage({ params }) {
                 <tr key={item.id} className="border-t border-slate-800">
                   <td className="px-3 py-2 text-slate-300">{item.id}</td>
                   <td className="px-3 py-2 text-slate-200">{item.status}</td>
+                  <td className="px-3 py-2 text-slate-300">{item.retry_count}</td>
                   <td className="px-3 py-2 text-slate-300">{new Date(item.scheduled_at).toLocaleString()}</td>
+                  <td className="px-3 py-2 text-slate-300">{item.next_attempt_at ? new Date(item.next_attempt_at).toLocaleString() : ''}</td>
                   <td className="px-3 py-2 text-slate-300">{item.channel_id || 'default'}</td>
                   <td className="px-3 py-2 text-slate-300">{item.sent_at ? new Date(item.sent_at).toLocaleString() : ''}</td>
                   <td className="max-w-sm whitespace-pre-wrap break-words px-3 py-2 text-slate-300">{item.error_message || ''}</td>
@@ -241,7 +245,7 @@ export default function GuildAnnouncementsPage({ params }) {
               ))}
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-3 py-6 text-center text-slate-400">
+                  <td colSpan={9} className="px-3 py-6 text-center text-slate-400">
                     No scheduled announcements yet.
                   </td>
                 </tr>

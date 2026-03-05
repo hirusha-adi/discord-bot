@@ -1,15 +1,20 @@
-version: "3.9"
-
 services:
   api:
     build:
       context: ../api
     env_file:
       - ../.env
+    command: ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
     ports:
       - "8000:8000"
     volumes:
       - app_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
     restart: unless-stopped
 
   web:
@@ -17,10 +22,18 @@ services:
       context: ../web
     env_file:
       - ../.env
+    command: ["sh", "-c", "npm run build && npm run start"]
     ports:
       - "3000:3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   bot:
@@ -29,7 +42,8 @@ services:
     env_file:
       - ../.env
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     volumes:
       - app_data:/data
     restart: unless-stopped
@@ -40,7 +54,8 @@ services:
     env_file:
       - ../.env
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     volumes:
       - app_data:/data
     command: ["python", "-m", "app.announcement_worker"]

@@ -1,4 +1,6 @@
+import logging
 import os
+import time
 from dataclasses import dataclass
 
 import httpx
@@ -8,6 +10,7 @@ from sqlalchemy.orm import Session
 from app.models import AnnouncementConfig, Guild, ScheduledAnnouncement
 
 DISCORD_CHANNEL_MESSAGE_URL = "https://discord.com/api/v10/channels/{channel_id}/messages"
+logger = logging.getLogger("announcement.dispatch")
 
 
 @dataclass
@@ -78,17 +81,55 @@ def send_announcement_to_discord(request: AnnouncementRequest) -> tuple[bool, st
         "allowed_mentions": _build_allowed_mentions(request.mention_policy, request.mention_role_ids),
     }
 
+    max_retries = max(0, int(os.getenv("DISCORD_POST_MAX_RETRIES", "3")))
+    base_backoff_seconds = max(1.0, float(os.getenv("DISCORD_POST_BASE_BACKOFF_SECONDS", "2")))
+
     with httpx.Client(timeout=15.0) as client:
-        response = client.post(
-            DISCORD_CHANNEL_MESSAGE_URL.format(channel_id=request.channel_discord_id),
-            headers={"Authorization": f"Bot {bot_token}"},
-            json=payload,
-        )
+        for attempt in range(max_retries + 1):
+            response = client.post(
+                DISCORD_CHANNEL_MESSAGE_URL.format(channel_id=request.channel_discord_id),
+                headers={"Authorization": f"Bot {bot_token}"},
+                json=payload,
+            )
 
-    if 200 <= response.status_code < 300:
-        return True, None
+            if 200 <= response.status_code < 300:
+                return True, None
 
-    return False, f"Discord API error {response.status_code}: {response.text[:500]}"
+            should_retry = False
+            sleep_seconds = base_backoff_seconds * (2**attempt)
+
+            if response.status_code == 429:
+                should_retry = attempt < max_retries
+                try:
+                    retry_after = float(response.json().get("retry_after", 0))
+                    sleep_seconds = max(sleep_seconds, retry_after)
+                except Exception:  # noqa: BLE001
+                    pass
+                logger.warning(
+                    "discord_post_rate_limited status=%s attempt=%s max_retries=%s sleep_seconds=%.2f",
+                    response.status_code,
+                    attempt + 1,
+                    max_retries + 1,
+                    sleep_seconds,
+                )
+            elif response.status_code >= 500:
+                should_retry = attempt < max_retries
+                logger.warning(
+                    "discord_post_server_error status=%s attempt=%s max_retries=%s sleep_seconds=%.2f",
+                    response.status_code,
+                    attempt + 1,
+                    max_retries + 1,
+                    sleep_seconds,
+                )
+
+            if should_retry:
+                # Guard against tight retry loops under rate limiting/transient errors.
+                time.sleep(min(sleep_seconds, 60.0))
+                continue
+
+            return False, f"Discord API error {response.status_code}: {response.text[:500]}"
+
+    return False, "Discord API send attempt exhausted"
 
 
 def scheduled_announcement_to_request(db: Session, scheduled: ScheduledAnnouncement) -> AnnouncementRequest:

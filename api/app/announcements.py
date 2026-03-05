@@ -47,6 +47,8 @@ class ScheduledAnnouncementOut(BaseModel):
     role_ids: list[str]
     scheduled_at: datetime
     status: str
+    retry_count: int
+    next_attempt_at: datetime | None
     sent_at: datetime | None
     error_message: str | None
     created_at: datetime
@@ -85,6 +87,8 @@ def _to_output(item: ScheduledAnnouncement, guild_id: str) -> ScheduledAnnouncem
         role_ids=role_ids,
         scheduled_at=item.scheduled_at,
         status=item.status,
+        retry_count=item.retry_count or 0,
+        next_attempt_at=item.next_attempt_at,
         sent_at=item.sent_at,
         error_message=item.failure_reason,
         created_at=item.created_at,
@@ -153,6 +157,8 @@ def create_scheduled_announcement(
         ping_role_ids=payload.role_ids if payload.mention_policy == "roles" else [],
         scheduled_at=_normalize_scheduled_at(payload.scheduled_at),
         status="pending",
+        retry_count=0,
+        next_attempt_at=None,
         sent_at=None,
         failure_reason=None,
         created_at=datetime.now(UTC),

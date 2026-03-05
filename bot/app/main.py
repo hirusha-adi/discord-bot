@@ -1,6 +1,7 @@
 import asyncio
 import hashlib
 import json
+import logging
 import os
 import re
 from datetime import UTC, datetime
@@ -17,6 +18,23 @@ DISCORD_TEST_GUILD_ID = os.getenv("DISCORD_TEST_GUILD_ID", "").strip()
 EMAIL_PATTERN = re.compile(r"^[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}$", re.IGNORECASE)
 
 start_time = datetime.now(UTC)
+logger = logging.getLogger("bot")
+
+
+def configure_logging() -> None:
+    level_name = os.getenv("LOG_LEVEL", "INFO").upper()
+    level = getattr(logging, level_name, logging.INFO)
+    logging.basicConfig(
+        level=level,
+        format="ts=%(asctime)s level=%(levelname)s service=bot logger=%(name)s msg=%(message)s",
+    )
+
+
+def _print_to_logger(*args, **kwargs) -> None:  # noqa: ARG001
+    logger.info(" ".join(str(arg) for arg in args))
+
+
+print = _print_to_logger  # noqa: A001
 
 
 def create_db_engine():
@@ -31,10 +49,10 @@ def db_startup_ping() -> bool:
     try:
         with engine.connect() as connection:
             connection.execute(text("SELECT 1"))
-        print("[bot] DB startup ping: OK")
+        logger.info("db_startup_ping_ok")
         return True
     except SQLAlchemyError as exc:
-        print(f"[bot] DB startup ping failed: {exc}")
+        logger.exception("db_startup_ping_failed error=%s", exc)
         return False
 
 
@@ -1119,6 +1137,7 @@ async def add_members_list(interaction: discord.Interaction, file: discord.Attac
 
 
 async def main() -> None:
+    configure_logging()
     db_startup_ping()
 
     token = DISCORD_BOT_TOKEN.strip()

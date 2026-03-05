@@ -9,9 +9,12 @@ from app.auth import router as auth_router
 from app.db import db_ping
 from app.deps import get_current_user
 from app.guilds import router as guilds_router
+from app.logging_config import configure_logging
 from app.models import User
 from app.modules import router as modules_router
 from app.verification import router as verification_router
+
+configure_logging("api")
 
 app = FastAPI(title="Discord Bot API", version="0.5.0")
 
