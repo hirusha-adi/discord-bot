@@ -10,6 +10,25 @@ export default function HomePage() {
   const [password, setPassword] = useState('');
   const [message, setMessage] = useState('Not authenticated');
 
+  const formatDetail = (detail, fallback) => {
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+      const joined = detail
+        .map((item) => {
+          if (typeof item === 'string') return item;
+          if (item && typeof item === 'object' && typeof item.msg === 'string') return item.msg;
+          return null;
+        })
+        .filter(Boolean)
+        .join('; ');
+      return joined || fallback;
+    }
+    if (detail && typeof detail === 'object' && typeof detail.msg === 'string') {
+      return detail.msg;
+    }
+    return fallback;
+  };
+
   const callAuth = async (path) => {
     const response = await fetch(`${API_BASE}${path}`, {
       method: 'POST',
@@ -20,7 +39,7 @@ export default function HomePage() {
 
     const data = await response.json();
     if (!response.ok) {
-      setMessage(data.detail || 'Request failed');
+      setMessage(formatDetail(data.detail, 'Request failed'));
       return;
     }
 
@@ -34,7 +53,7 @@ export default function HomePage() {
     });
     const data = await response.json();
     if (!response.ok) {
-      setMessage(data.detail || 'No active session');
+      setMessage(formatDetail(data.detail, 'No active session'));
       return;
     }
     setMessage(`Session active for user #${data.user.id}`);
